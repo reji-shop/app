@@ -188,7 +188,7 @@ let products=store.get('products',[]), sales=store.get('sales',[]), cart={}, edi
 const TRASH='<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 10v6M14 10v6"/></svg>';
 const find=id=>products.find(p=>p.id===id);
 const total=()=>Object.entries(cart).reduce((t,[id,q])=>t+(find(id)?find(id).price*q:0),0);
-let tt;function toast(m){const e=$('#toast');e.textContent=m;e.classList.add('on');clearTimeout(tt);tt=setTimeout(()=>e.classList.remove('on'),2200)}
+let tt;function toast(m,ms=2200){const e=$('#toast');e.textContent=m;e.classList.add('on');clearTimeout(tt);tt=setTimeout(()=>e.classList.remove('on'),ms)}
 
 function render(){
   $('#grid').innerHTML=products.map(p=>`<button class="tile" data-add="${p.id}"><span>${esc(p.name)}</span><b>${yen(p.price)}</b></button>`).join('')+'<button class="tile new" data-new>＋ 商品を登録</button>';
@@ -267,7 +267,7 @@ $('#bSet').onclick=()=>{renderSet();$('#dSet').showModal()};
 $('#bCsv').onclick=csv;
 $('#bWipe').onclick=()=>{if(sales.length&&confirm('売上履歴をすべて削除します。元に戻せません。よろしいですか？')){sales=[];store.set('sales',sales);toast('削除しました')}};
 // ===== クラウド連携（Firebase Firestore）=====
-let fb=store.get('fb',null),shop=store.get('shop',''),view=store.get('view','reji'),cloud=null,orders=[],online=false,first=true;
+let fb=store.get('fb',null),shop=store.get('shop',''),view=store.get('view','reji'),cloud=null,orders=[],online=false,first=true,cerr='';
 const linked=()=>!!(fb&&shop);
 const ST={new:'受付',cooking:'調理中'};
 const dayKey=()=>new Date().toLocaleDateString('sv-SE');
@@ -303,9 +303,9 @@ async function connect(){
     const app=A.initializeApp(fb);let db;
     try{db=F.initializeFirestore(app,{localCache:F.persistentLocalCache()})}catch{db=F.getFirestore(app)}
     cloud={F,db};
-    F.onSnapshot(F.query(F.collection(db,'shops',shop,'orders'),F.where('status','in',['new','cooking','done'])),snap=>{
+    F.onSnapshot(F.query(F.collection(db,'shops',shop,'orders'),F.where('status','in',['new','cooking','done'])),{includeMetadataChanges:true},snap=>{
       orders=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.ts-b.ts);
-      online=!snap.metadata.fromCache;
+      online=!snap.metadata.fromCache;if(online)cerr='';
       if(!first)snap.docChanges().forEach(c=>{
         if(c.doc.metadata.hasPendingWrites)return;
         const s=c.doc.data().status;
@@ -314,14 +314,14 @@ async function connect(){
       });
       if(!snap.metadata.fromCache)first=false;
       renderCloud();
-    },err=>{online=false;renderCloud();toast('連携エラー：'+(err.code||'不明'))});
-  }catch{toast('連携を開始できませんでした。設定を確認してください')}
+    },err=>{online=false;cerr=err.code||'unknown';renderCloud();toast('連携エラー：'+cerr+'（ルールの公開を確認してください）',5000)});
+  }catch{cerr='sdk';renderCloud();toast('Firebase の部品を読み込めませんでした。ネット接続を確認してください',5000)}
 }
 function renderCloud(){
   const L=linked(),act=orders.filter(o=>o.status!=='done');
   $('#tabs').hidden=!L;
   $('#conn').className=L?(online?'on':'off'):'hide';
-  $('#conn').textContent=online?'● 接続中':'● 未接続';
+  $('#conn').textContent=online?'● 接続中':cerr?'● エラー':'● 未接続';
   $('#bd').textContent=act.length||'';
   $('#plist').innerHTML=act.map(o=>`<div class="oc ${o.status}"><div class="oh"><b>No.${o.no}</b><span>${ST[o.status]}・${ago(o.ts)}</span></div><ul>${o.items.map(i=>`<li><span>${esc(i.name)}</span><b>×${i.qty}</b></li>`).join('')}</ul><div class="two">${o.status==='cooking'?`<button class="btn" data-st="${o.id}|new">戻す</button>`:'<span></span>'}<button class="btn p" data-st="${o.id}|${o.status==='new'?'cooking':'done'}">${o.status==='new'?'調理を始める':'完成'}</button></div></div>`).join('')||'<p class="empty">いま準備する注文はありません</p>';
   $('#calls').innerHTML=orders.filter(o=>o.status==='done').map(o=>`<div class="call"><span><b>No.${o.no}</b>　完成しました</span><button class="btn p" data-st="${o.id}|handed">渡した</button></div>`).join('');
@@ -344,6 +344,9 @@ $('#lSave').onclick=()=>{
 };
 $('#lOff').onclick=()=>{if(confirm('連携をやめますか？（この端末の売上履歴は残ります）')){localStorage.removeItem('pos.fb');localStorage.removeItem('pos.shop');location.reload()}};
 setInterval(()=>{if(linked())renderCloud()},30000);
+const HINT='まだ接続できていません。Firestore Database の作成、ルールの公開、設定と店舗コードの貼り付けを確認してください';
+$('#conn').onclick=()=>toast(online?'接続中です':cerr?'エラー：'+cerr:HINT,5000);
+setTimeout(()=>{if(linked()&&!online&&!cerr)toast(HINT,6000)},8000);
 render();setView(view);renderCloud();connect();
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>
