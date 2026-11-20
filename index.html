@@ -155,19 +155,41 @@ textarea.in{height:130px;padding:10px 14px;font-size:13px;resize:vertical}
       <button class="btn p" id="bLink">複数台で連携する（クラウド）</button>
       <button class="btn" id="bCsv">売上をCSVで保存</button>
       <button class="btn d" id="bWipe">売上履歴をすべて削除</button>
-      <p class="empty" style="padding:0">データはこの端末の中にだけ保存されます。<br>アプリのバージョン：v10</p>
+      <p class="empty" style="padding:0">データはこの端末の中にだけ保存されます。<br>アプリのバージョン：v12</p>
     </div>
   </div>
 </dialog>
 <dialog id="dLink">
   <div class="dh"><span>複数台で連携</span><button class="x" data-close aria-label="閉じる">✕</button></div>
   <div class="db">
+    <div id="authBox" hidden>
+      <label for="aid">店舗ID</label>
+      <input class="in" id="aid" placeholder="例）tenpo-2026" autocomplete="username" autocapitalize="off" spellcheck="false" style="margin-bottom:6px">
+      <p class="hint">英小文字・数字・- _ が使えます（3〜30文字）。全端末で同じIDにします。</p>
+      <label for="apw">パスワード</label>
+      <input class="in" id="apw" type="password" autocomplete="off" placeholder="6文字以上" style="margin-bottom:6px">
+      <p class="hint">2台目以降は、1台目で決まったIDとパスワードで「ログイン」します。</p>
+      <label style="display:flex;gap:10px;align-items:center;font-weight:400;margin:0 0 12px"><input type="checkbox" id="rem" style="width:22px;height:22px;flex:none"><span>この端末にログインを記憶する（オフなら、アプリを閉じるたびに入力が必要です）</span></label>
+      <div class="stack" style="margin:0 0 14px">
+        <button class="btn p" id="aIn">ログイン</button>
+        <button class="btn" id="aNew">新しい店舗を作る（IDとパスワードを自動で決める）</button>
+        <button class="btn d" id="aEnd" hidden>営業を終了（IDとクラウドのデータを削除）</button>
+      </div>
+    </div>
+    <div id="newInfo" hidden>
+      <p style="margin:0 0 10px;font-weight:700">店舗IDとパスワードができました</p>
+      <div style="background:#f2f6fd;border-radius:12px;padding:12px;margin-bottom:10px;font-size:20px;line-height:1.9;overflow-wrap:anywhere">ID：<b id="niId"></b><br>パスワード：<b id="niPw"></b></div>
+      <p class="hint">他の端末では、これを入力して「ログイン」します。<b>この画面を閉じるとパスワードは二度と表示されません。</b>必ずメモしてください。</p>
+      <button class="btn p" id="niOk" style="width:100%">メモしました。始める</button>
+    </div>
+    <div id="manual">
     <label for="shop">店舗コード</label>
     <input class="in" id="shop" placeholder="例）okinawa-2026-xxxx" autocomplete="off" autocapitalize="off" style="margin-bottom:6px">
     <p class="hint">全端末で同じコードにします。他の人に知られないよう、長めで推測されにくいものにしてください。</p>
     <label for="fbcfg">Firebase の設定</label>
     <textarea class="in" id="fbcfg" autocomplete="off" autocapitalize="off" spellcheck="false" style="margin-bottom:6px"></textarea>
     <p class="hint">Firebase コンソールの「プロジェクトの設定」→「マイアプリ」にある firebaseConfig を、そのまま貼り付けます。</p>
+    </div>
     <label style="display:flex;gap:10px;align-items:center;font-weight:400;margin:0 0 14px"><input type="checkbox" id="lp" style="width:22px;height:22px;flex:none"><span>安定モード（スマホで通知が遅れるとき向け）</span></label>
     <button class="btn" id="lDiag" style="width:100%;margin-bottom:10px">接続を診断する</button>
     <pre class="hint" id="diag" hidden style="white-space:pre-wrap;font:inherit;background:#f2f6fd;border-radius:10px;padding:10px"></pre>
@@ -176,6 +198,7 @@ textarea.in{height:130px;padding:10px 14px;font-size:13px;resize:vertical}
 </dialog>
 <div id="toast" role="status"></div>
 
+<script src="config.js"></script>
 <script>
 const $=s=>document.querySelector(s);
 const yen=n=>n.toLocaleString('ja-JP')+'円';
@@ -270,8 +293,18 @@ $('#bSet').onclick=()=>{renderSet();$('#dSet').showModal()};
 $('#bCsv').onclick=csv;
 $('#bWipe').onclick=()=>{if(sales.length&&confirm('売上履歴をすべて削除します。元に戻せません。よろしいですか？')){sales=[];store.set('sales',sales);toast('削除しました')}};
 // ===== クラウド連携（Firebase Firestore）=====
-let fb=store.get('fb',null),shop=store.get('shop',''),view=store.get('view','reji'),cloud=null,orders=[],online=false,first=true,cerr='',dbid=store.get('dbid','(default)'),lastSync=0,pending=0,tickSeen=null,stale=0,polling=false;
-const linked=()=>!!(fb&&shop);
+const sess={get(k,d){try{return JSON.parse(sessionStorage.getItem('pos.'+k))??d}catch{return d}},set(k,v){try{sessionStorage.setItem('pos.'+k,JSON.stringify(v))}catch{}}};
+let fb=store.get('fb',null),shop=store.get('shop','')||sess.get('shop',''),view=store.get('view','reji'),cloud=null,orders=[],online=false,first=true,cerr='',dbid=store.get('dbid','(default)'),lastSync=0,pending=0,tickSeen=null,stale=0,polling=false;
+const EMAIL='@reji.example.com';
+const BUILT=(()=>{try{
+  if(typeof firebaseConfig==='undefined'||!firebaseConfig)return null;
+  const c=firebaseConfig;if(!c.apiKey||!c.projectId||!c.appId)return null;
+  return{cfg:c,dbid:(typeof DB_ID!=='undefined'&&DB_ID)?DB_ID:'(default)'};
+}catch{return null}})();
+if(BUILT)dbid=BUILT.dbid;
+const cfg=()=>BUILT?BUILT.cfg:fb;
+const linked=()=>!!(cfg()&&shop);
+let authMod=null,authObj=null;
 const ST={new:'受付',cooking:'調理中'};
 const dayKey=()=>new Date().toLocaleDateString('sv-SE');
 const ago=ts=>{const m=Math.floor((Date.now()-ts)/60000);return m<1?'たった今':m+'分前'};
@@ -308,7 +341,12 @@ async function connect(){
   try{
     const v='10.12.2',base='https://www.gstatic.com/firebasejs/'+v+'/';
     const[A,F]=await Promise.all([import(base+'firebase-app.js'),import(base+'firebase-firestore.js')]);
-    const app=A.initializeApp(fb);let db;
+    const app=A.initializeApp(cfg());let db;
+    if(BUILT){
+      const AU=await import(base+'firebase-auth.js');authMod=AU;authObj=AU.getAuth(app);
+      const user=await new Promise(res=>{const un=AU.onAuthStateChanged(authObj,u=>{un();res(u)})});
+      if(!user||user.email!==shop+EMAIL){cerr='auth';renderCloud();toast('ログインしてください（設定 →「複数台で連携」）',5000);return}
+    }
     try{db=F.initializeFirestore(app,{localCache:F.persistentLocalCache(),...(store.get('lp',true)?{experimentalForceLongPolling:true}:{experimentalAutoDetectLongPolling:true})},dbid)}catch{db=F.getFirestore(app,dbid)}
     cloud={F,db};
     F.onSnapshot(ref('meta','tick'),s=>{tickSeen=s.exists()?s.data().t:0},()=>{});
@@ -329,8 +367,8 @@ async function connect(){
 function renderCloud(){
   const L=linked(),act=orders.filter(o=>o.status!=='done');
   $('#tabs').hidden=!L;
-  $('#conn').className=L?(online?'on':'off'):'hide';
-  $('#conn').textContent=online?'● 接続中 '+(lastSync?new Date(lastSync).toLocaleTimeString('ja-JP'):''):cerr?'● エラー':'● 未接続';
+  const NL=!!BUILT&&!L;$('#conn').className=L||NL?(online?'on':'off'):'hide';
+  $('#conn').textContent=NL?'● 未ログイン':online?'● 接続中 '+(lastSync?new Date(lastSync).toLocaleTimeString('ja-JP'):''):cerr==='auth'?'● 要ログイン':cerr?'● エラー':'● 未接続';
   $('#bd').textContent=act.length||'';
   $('#plist').innerHTML=act.map(o=>`<div class="oc ${o.status}"><div class="oh"><b>No.${o.no}</b><span>${ST[o.status]}・${ago(o.ts)}</span></div><ul>${o.items.map(i=>`<li><span>${esc(i.name)}</span><b>×${i.qty}</b></li>`).join('')}</ul><div class="two">${o.status==='cooking'?`<button class="btn" data-st="${o.id}|new">戻す</button>`:'<span></span>'}<button class="btn p" data-st="${o.id}|${o.status==='new'?'cooking':'done'}">${o.status==='new'?'調理を始める':'完成'}</button></div></div>`).join('')||'<p class="empty">いま準備する注文はありません</p>';
   $('#calls').innerHTML=orders.filter(o=>o.status==='done').map(o=>`<div class="call"><span><b>No.${o.no}</b>　完成しました</span><button class="btn p" data-st="${o.id}|handed">渡した</button></div>`).join('');
@@ -343,6 +381,9 @@ function setView(v){
 $('#bLink').onclick=()=>{
   $('#dSet').close();$('#diag').hidden=true;$('#shop').value=shop;$('#fbcfg').value='';$('#lp').checked=store.get('lp',true);
   $('#fbcfg').placeholder=fb?'設定済みです。変更するときだけ貼り付けてください':'ここに firebaseConfig を貼り付け';
+  const B=!!BUILT;$('#authBox').hidden=!B;$('#manual').hidden=B;$('#lDiag').hidden=B;$('#lSave').hidden=B;
+  $('#lOff').style.gridColumn=B?'1/-1':'';$('#lOff').textContent=B?'ログアウト':'連携をやめる';
+  $('#aid').value=shop;$('#apw').value='';$('#rem').checked=store.get('rem',false);$('#aEnd').hidden=!(B&&authObj&&authObj.currentUser);
   $('#dLink').showModal();
 };
 $('#lSave').onclick=async()=>{
@@ -358,7 +399,80 @@ $('#lSave').onclick=async()=>{
   }catch{}
   store.set('fb',c);store.set('shop',sc);store.set('dbid',id);store.set('lp',$('#lp').checked);location.reload();
 };
-$('#lOff').onclick=()=>{if(confirm('連携をやめますか？（この端末の売上履歴は残ります）')){localStorage.removeItem('pos.fb');localStorage.removeItem('pos.shop');localStorage.removeItem('pos.dbid');location.reload()}};
+const AUERR={
+  'auth/email-already-in-use':'その店舗IDはすでに使われています。「ログイン」を押すか、別のIDにしてください',
+  'auth/invalid-credential':'店舗IDかパスワードが違います','auth/invalid-login-credentials':'店舗IDかパスワードが違います','auth/wrong-password':'店舗IDかパスワードが違います',
+  'auth/user-not-found':'その店舗IDは登録されていません。1台目で作ったIDとパスワードを確認してください',
+  'auth/weak-password':'パスワードは6文字以上にしてください',
+  'auth/operation-not-allowed':'Firebase で「メール/パスワード」のログインがオンになっていません',
+  'auth/network-request-failed':'通信できませんでした。ネット接続を確認してください',
+  'auth/too-many-requests':'試行回数が多すぎます。しばらく待ってからやり直してください'};
+const AL='abcdefghijkmnpqrstuvwxyz23456789';
+const rnd=n=>{const a=new Uint8Array(n);crypto.getRandomValues(a);return[...a].map(x=>AL[x%AL.length]).join('')};
+async function authReady(){
+  const base='https://www.gstatic.com/firebasejs/10.12.2/';
+  const[A,AU]=await Promise.all([import(base+'firebase-app.js'),import(base+'firebase-auth.js')]);
+  const app=A.getApps().length?A.getApp():A.initializeApp(cfg());
+  const auth=AU.getAuth(app);
+  const rem=$('#rem').checked;store.set('rem',rem);
+  await AU.setPersistence(auth,rem?AU.browserLocalPersistence:AU.browserSessionPersistence);
+  return{AU,auth,rem};
+}
+function saveShop(id,rem){
+  if(rem){store.set('shop',id);sess.set('shop','')}else{localStorage.removeItem('pos.shop');sess.set('shop',id)}
+}
+const busy=b=>{$('#aIn').disabled=$('#aNew').disabled=b};
+async function doLogin(){
+  const id=$('#aid').value.trim().toLowerCase(),pw=$('#apw').value;
+  if(!/^[a-z0-9_-]{3,30}$/.test(id))return toast('店舗IDを入力してください（英小文字・数字・- _ の3〜30文字）');
+  if(pw.length<6)return toast('パスワードは6文字以上です');
+  busy(true);toast('確認しています…');
+  try{
+    const{AU,auth,rem}=await authReady();
+    await AU.signInWithEmailAndPassword(auth,id+EMAIL,pw);
+    saveShop(id,rem);location.reload();
+  }catch(e){toast(AUERR[e.code]||'ログインできませんでした（'+(e.code||'エラー')+'）',5000);busy(false)}
+}
+async function newShop(){
+  busy(true);toast('作成しています…');
+  try{
+    const{AU,auth,rem}=await authReady();
+    const pw=rnd(8);let id='';
+    for(let i=0;i<6;i++){
+      id=rnd(4)+'-'+rnd(4);
+      try{await AU.createUserWithEmailAndPassword(auth,id+EMAIL,pw);break}
+      catch(e){if(e.code!=='auth/email-already-in-use'||i===5)throw e}
+    }
+    saveShop(id,rem);
+    $('#niId').textContent=id;$('#niPw').textContent=pw;
+    [...$('#dLink .db').children].forEach(c=>{c.hidden=c.id!=='newInfo'});
+    $('#dLink .x').hidden=true;
+  }catch(e){toast(AUERR[e.code]||'作成できませんでした（'+(e.code||'エラー')+'）',5000);busy(false)}
+}
+async function endShop(){
+  if(!cloud||!authMod||!authObj||!authObj.currentUser)return toast('先にログインしてください');
+  if(!confirm('営業を終了します。\nこの店舗IDと、クラウド上の注文データをすべて削除します。他の端末もつながらなくなります。\n（この端末の売上履歴は残ります）'))return;
+  const pw=prompt('パスワードを入力してください');if(!pw)return;
+  $('#aEnd').disabled=true;toast('削除しています…',8000);
+  try{
+    const u=authObj.currentUser,F=cloud.F;
+    await authMod.reauthenticateWithCredential(u,authMod.EmailAuthProvider.credential(u.email,pw));
+    for(const col of['orders','meta']){
+      const s=await F.getDocsFromServer(F.collection(cloud.db,'shops',shop,col));
+      for(let i=0;i<s.docs.length;i+=400){const b=F.writeBatch(cloud.db);s.docs.slice(i,i+400).forEach(d=>b.delete(d.ref));await b.commit()}
+    }
+    await authMod.deleteUser(u);
+    ['fb','shop','dbid'].forEach(k=>localStorage.removeItem('pos.'+k));try{sessionStorage.removeItem('pos.shop')}catch{}
+    location.reload();
+  }catch(e){$('#aEnd').disabled=false;toast((e.code==='auth/wrong-password'||e.code==='auth/invalid-credential')?'パスワードが違います':'削除できませんでした（'+(e.code||'エラー')+'）',5000)}
+}
+$('#aIn').onclick=doLogin;$('#aNew').onclick=newShop;$('#aEnd').onclick=endShop;$('#niOk').onclick=()=>location.reload();
+$('#lp').onchange=()=>{store.set('lp',$('#lp').checked);if(BUILT)location.reload();else toast('「保存して連携」を押すと反映されます')};
+$('#lOff').onclick=async()=>{
+  if(!confirm(BUILT?'ログアウトしますか？（この端末の売上履歴は残ります）':'連携をやめますか？（この端末の売上履歴は残ります）'))return;
+  try{if(authMod&&authObj)await authMod.signOut(authObj)}catch{}
+  ['fb','shop','dbid'].forEach(k=>localStorage.removeItem('pos.'+k));try{sessionStorage.removeItem('pos.shop')}catch{}location.reload();
+};
 async function probe(c,sc,id){
   const url='https://firestore.googleapis.com/v1/projects/'+encodeURIComponent(c.projectId)+'/databases/'+encodeURIComponent(id)+'/documents/shops/'+encodeURIComponent(sc)+':runQuery?key='+encodeURIComponent(c.apiKey);
   const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({structuredQuery:{from:[{collectionId:'orders'}],limit:1}})});
@@ -427,7 +541,7 @@ async function poll(){
 setInterval(poll,4000);
 setInterval(()=>{if(linked())renderCloud()},30000);
 const HINT='まだ接続できていません。Firestore Database の作成、ルールの公開、設定と店舗コードの貼り付けを確認してください';
-$('#conn').onclick=()=>toast(online?'接続中です':cerr?'エラー：'+cerr:HINT,5000);
+$('#conn').onclick=()=>{if(BUILT&&(!linked()||cerr==='auth'))return $('#bLink').click();toast(online?'接続中です':cerr?'エラー：'+cerr:HINT,5000)};
 setTimeout(()=>{if(linked()&&!online&&!cerr)toast(HINT,6000)},8000);
 render();setView(view);renderCloud();connect();
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
