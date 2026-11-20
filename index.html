@@ -155,7 +155,7 @@ textarea.in{height:130px;padding:10px 14px;font-size:13px;resize:vertical}
       <button class="btn p" id="bLink">複数台で連携する（クラウド）</button>
       <button class="btn" id="bCsv">売上をCSVで保存</button>
       <button class="btn d" id="bWipe">売上履歴をすべて削除</button>
-      <p class="empty" style="padding:0">データはこの端末の中にだけ保存されます。<br>アプリのバージョン：v7</p>
+      <p class="empty" style="padding:0">データはこの端末の中にだけ保存されます。<br>アプリのバージョン：v8</p>
     </div>
   </div>
 </dialog>
@@ -352,8 +352,10 @@ $('#lSave').onclick=()=>{
 };
 $('#lOff').onclick=()=>{if(confirm('連携をやめますか？（この端末の売上履歴は残ります）')){localStorage.removeItem('pos.fb');localStorage.removeItem('pos.shop');localStorage.removeItem('pos.dbid');location.reload()}};
 async function probe(c,sc,id){
-  const url='https://firestore.googleapis.com/v1/projects/'+encodeURIComponent(c.projectId)+'/databases/'+encodeURIComponent(id)+'/documents/shops/'+encodeURIComponent(sc)+'/orders?pageSize=1&key='+encodeURIComponent(c.apiKey);
-  const r=await fetch(url);let j={};try{j=await r.json()}catch{}
+  const url='https://firestore.googleapis.com/v1/projects/'+encodeURIComponent(c.projectId)+'/databases/'+encodeURIComponent(id)+'/documents/shops/'+encodeURIComponent(sc)+':runQuery?key='+encodeURIComponent(c.apiKey);
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({structuredQuery:{from:[{collectionId:'orders'}],limit:1}})});
+  let j={};try{j=await r.json()}catch{}
+  if(Array.isArray(j))j=j[0]||{};
   const er=j.error||{};return{s:r.status,ok:r.ok,st:er.status||'',msg:er.message||''};
 }
 function judge(p){
@@ -370,6 +372,15 @@ async function diagnose(){
   if(!c){out.textContent='Firebase の設定が見つかりません。firebaseConfig を貼り付けてください。';return}
   if(!sc){out.textContent='店舗コードを入力してください。';return}
   out.textContent='確認中…';
+  if(cloud&&!raw&&sc===shop){
+    try{
+      await cloud.F.getDocFromServer(ref('meta','tick'));
+      out.textContent='OK：このアプリはすでに Firestore とつながっています。\n（プロジェクトID：'+c.projectId+'／データベース：'+dbid+'）';
+    }catch(e){
+      out.textContent=(e.code==='permission-denied'?'アクセスが拒否されました。Firestore の「セキュリティ」タブのルールを確認し、「公開」まで押してください。':'通信できませんでした。ネット接続を確認してください。')+'\n（'+(e.code||'エラー')+'）';
+    }
+    return;
+  }
   try{
     let id=raw?'(default)':dbid,p=await probe(c,sc,id),note='';
     if(p.s===404&&id==='(default)'){
