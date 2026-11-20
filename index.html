@@ -65,21 +65,48 @@ label{display:block;font-weight:700;margin:0 0 6px}
 .stack{display:grid;gap:10px;margin-top:14px}
 #toast{position:fixed;left:50%;bottom:calc(120px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#14213d;color:#fff;padding:12px 18px;border-radius:12px;font-weight:700;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw;text-align:center}
 #toast.on{opacity:1}
+[hidden]{display:none!important}
+#conn{font-style:normal;font-size:12px;font-weight:400;margin-left:6px}
+#conn.on{color:#8cf0b0}#conn.off{color:#cbd5e1}#conn.hide{display:none}
+#tabs{flex:none;display:flex;background:#fff;border-bottom:1.5px solid var(--line)}
+#tabs button{flex:1;height:46px;border:0;background:none;font-weight:700;color:var(--sub);border-bottom:3px solid transparent}
+#tabs .on{color:var(--blue);border-color:var(--blue)}
+.bd{display:inline-block;min-width:22px;padding:0 6px;border-radius:11px;background:var(--danger);color:#fff;font-size:13px;margin-left:6px}
+.bd:empty{display:none}
+.oc{background:#fff;border:2px solid var(--line);border-radius:16px;padding:12px;margin-bottom:10px}
+.oc.new{border-color:#f59e0b;background:#fffbeb}
+.oc.cooking{border-color:var(--blue);background:#eef4ff}
+.oh{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+.oh b{font-size:26px}.oh span{color:var(--sub);font-size:14px}
+.oc ul{list-style:none;margin:0 0 10px;padding:0;font-size:19px}
+.oc li{display:flex;justify-content:space-between;padding:3px 0}
+.call{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#e8f7ee;border:2px solid #34a853;border-radius:14px;padding:8px 8px 8px 14px;margin-bottom:8px;font-size:18px}
+.call .btn{height:42px;padding:0 14px}
+textarea.in{height:130px;padding:10px 14px;font-size:13px;resize:vertical}
+.hint{font-size:13px;color:var(--sub);margin:0 0 14px}
 </style>
 </head>
 <body>
 <header>
-  <h1>レジ</h1>
+  <h1>レジ<i id="conn" class="hide"></i></h1>
   <button class="hb" id="bHist">履歴</button>
   <button class="hb" id="bSet">設定</button>
 </header>
-<main>
+<nav id="tabs" hidden>
+  <button data-view="reji">レジ</button>
+  <button data-view="prep">準備<span class="bd" id="bd"></span></button>
+</nav>
+<main id="vReji">
+  <div id="calls"></div>
   <div class="sec"><span>商品（タップで追加）</span></div>
   <div class="grid" id="grid"></div>
   <div class="sec"><span>注文</span><button class="lnk" id="clr">すべて取り消す</button></div>
   <div id="cart"></div>
 </main>
-<footer>
+<main id="vPrep" hidden>
+  <div id="plist"></div>
+</main>
+<footer id="fReji">
   <div class="tot"><span>合計金額</span><b id="total">0円</b></div>
   <button class="go" id="pay" disabled>お会計</button>
 </footer>
@@ -125,10 +152,23 @@ label{display:block;font-weight:700;margin:0 0 6px}
     <div class="sec"><span>登録済みの商品</span></div>
     <div id="slist"></div>
     <div class="stack">
+      <button class="btn p" id="bLink">複数台で連携する（クラウド）</button>
       <button class="btn" id="bCsv">売上をCSVで保存</button>
       <button class="btn d" id="bWipe">売上履歴をすべて削除</button>
       <p class="empty" style="padding:0">データはこの端末の中にだけ保存されます。</p>
     </div>
+  </div>
+</dialog>
+<dialog id="dLink">
+  <div class="dh"><span>複数台で連携</span><button class="x" data-close aria-label="閉じる">✕</button></div>
+  <div class="db">
+    <label for="shop">店舗コード</label>
+    <input class="in" id="shop" placeholder="例）okinawa-2026-xxxx" autocomplete="off" autocapitalize="off" style="margin-bottom:6px">
+    <p class="hint">全端末で同じコードにします。他の人に知られないよう、長めで推測されにくいものにしてください。</p>
+    <label for="fbcfg">Firebase の設定</label>
+    <textarea class="in" id="fbcfg" autocomplete="off" autocapitalize="off" spellcheck="false" style="margin-bottom:6px"></textarea>
+    <p class="hint">Firebase コンソールの「プロジェクトの設定」→「マイアプリ」にある firebaseConfig を、そのまま貼り付けます。</p>
+    <div class="two"><button class="btn d" id="lOff">連携をやめる</button><button class="btn p" id="lSave">保存して連携</button></div>
   </div>
 </dialog>
 <div id="toast" role="status"></div>
@@ -176,11 +216,13 @@ function updPay(){
   const diff=paid-total();$('#paid').value=paid||'';
   $('#chg').textContent=diff>=0?`おつり ${yen(diff)}`:`あと ${yen(-diff)}`;$('#ok').disabled=diff<0;
 }
-function confirmPay(){
+async function confirmPay(){
   const t=total();if(!t||paid<t)return;
   const items=Object.entries(cart).filter(([id])=>find(id)).map(([id,q])=>({name:find(id).name,price:find(id).price,qty:q}));
-  const no=sales.filter(s=>isToday(s.ts)).length+1;
-  sales.push({id:uid(),no,ts:Date.now(),items,total:t,paid,change:paid-t});store.set('sales',sales);
+  $('#ok').disabled=true;
+  const no=await nextNo();
+  const s={id:uid(),no,ts:Date.now(),items,total:t,paid,change:paid-t};
+  sales.push(s);store.set('sales',sales);sendOrder(s);
   const ch=paid-t;cart={};paid=0;$('#dPay').close();render();toast(`会計完了　おつり ${yen(ch)}`);
 }
 function renderHist(){
@@ -210,6 +252,8 @@ document.addEventListener('click',e=>{
   else if('close' in d)b.closest('dialog').close();
   else if(d.edit)openProd(d.edit);
   else if(d.rm){const p=find(d.rm);if(p&&confirm(`「${p.name}」を削除しますか？`)){products=products.filter(x=>x.id!==p.id);delete cart[p.id];store.set('products',products);render();renderSet()}}
+  else if(d.view)setView(d.view);
+  else if(d.st){const[id,s]=d.st.split('|');setStatus(id,s)}
   else if(d.amt){if(d.amt==='exact')paid=total();else if(d.amt==='clr')paid=0;else paid+=Number(d.amt);updPay()}
 });
 $('#pSave').onclick=saveProd;
@@ -222,7 +266,85 @@ $('#bHist').onclick=()=>{renderHist();$('#dHist').showModal()};
 $('#bSet').onclick=()=>{renderSet();$('#dSet').showModal()};
 $('#bCsv').onclick=csv;
 $('#bWipe').onclick=()=>{if(sales.length&&confirm('売上履歴をすべて削除します。元に戻せません。よろしいですか？')){sales=[];store.set('sales',sales);toast('削除しました')}};
-render();
+// ===== クラウド連携（Firebase Firestore）=====
+let fb=store.get('fb',null),shop=store.get('shop',''),view=store.get('view','reji'),cloud=null,orders=[],online=false,first=true;
+const linked=()=>!!(fb&&shop);
+const ST={new:'受付',cooking:'調理中'};
+const dayKey=()=>new Date().toLocaleDateString('sv-SE');
+const ago=ts=>{const m=Math.floor((Date.now()-ts)/60000);return m<1?'たった今':m+'分前'};
+let ac;
+function unlock(){if(!ac){try{ac=new(window.AudioContext||window.webkitAudioContext)()}catch{}}if(ac&&ac.state==='suspended')ac.resume()}
+document.addEventListener('click',unlock);
+function beep(n){unlock();if(ac)for(let i=0;i<n;i++){const o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime+i*.3;o.frequency.value=880;g.gain.value=.2;o.connect(g);g.connect(ac.destination);o.start(t);o.stop(t+.18)}if(navigator.vibrate)navigator.vibrate([200,100,200])}
+function parseFb(t){const o={};for(const k of['apiKey','authDomain','projectId','storageBucket','messagingSenderId','appId']){const m=t.match(new RegExp(k+'["\']?\\s*:\\s*["\']([^"\']+)["\']'));if(m)o[k]=m[1]}return o.apiKey&&o.projectId&&o.appId?o:null}
+const ref=(...p)=>cloud.F.doc(cloud.db,'shops',shop,...p);
+async function nextNo(){
+  const local=sales.filter(s=>isToday(s.ts)).length+1;
+  if(!cloud)return local;
+  try{
+    return await Promise.race([
+      cloud.F.runTransaction(cloud.db,async t=>{const r=ref('meta','no-'+dayKey());const s=await t.get(r);const n=(s.exists()?s.data().n:0)+1;t.set(r,{n});return n}),
+      new Promise((_,rej)=>setTimeout(rej,3000))]);
+  }catch{return local}
+}
+function sendOrder(s){
+  if(!cloud)return;
+  cloud.F.setDoc(ref('orders',s.id),{no:s.no,ts:s.ts,items:s.items,total:s.total,status:'new'}).catch(()=>toast('注文を送れませんでした'));
+}
+function setStatus(id,status){
+  if(!cloud)return;
+  cloud.F.updateDoc(ref('orders',id),{status,[status+'At']:Date.now()}).catch(()=>toast('更新できませんでした'));
+}
+async function connect(){
+  if(!linked())return;
+  try{
+    const v='10.12.2',base='https://www.gstatic.com/firebasejs/'+v+'/';
+    const[A,F]=await Promise.all([import(base+'firebase-app.js'),import(base+'firebase-firestore.js')]);
+    const app=A.initializeApp(fb);let db;
+    try{db=F.initializeFirestore(app,{localCache:F.persistentLocalCache()})}catch{db=F.getFirestore(app)}
+    cloud={F,db};
+    F.onSnapshot(F.query(F.collection(db,'shops',shop,'orders'),F.where('status','in',['new','cooking','done'])),snap=>{
+      orders=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.ts-b.ts);
+      online=!snap.metadata.fromCache;
+      if(!first)snap.docChanges().forEach(c=>{
+        if(c.doc.metadata.hasPendingWrites)return;
+        const s=c.doc.data().status;
+        if(view==='prep'&&c.type==='added'&&s==='new')beep(2);
+        if(view==='reji'&&c.type==='modified'&&s==='done')beep(3);
+      });
+      if(!snap.metadata.fromCache)first=false;
+      renderCloud();
+    },err=>{online=false;renderCloud();toast('連携エラー：'+(err.code||'不明'))});
+  }catch{toast('連携を開始できませんでした。設定を確認してください')}
+}
+function renderCloud(){
+  const L=linked(),act=orders.filter(o=>o.status!=='done');
+  $('#tabs').hidden=!L;
+  $('#conn').className=L?(online?'on':'off'):'hide';
+  $('#conn').textContent=online?'● 接続中':'● 未接続';
+  $('#bd').textContent=act.length||'';
+  $('#plist').innerHTML=act.map(o=>`<div class="oc ${o.status}"><div class="oh"><b>No.${o.no}</b><span>${ST[o.status]}・${ago(o.ts)}</span></div><ul>${o.items.map(i=>`<li><span>${esc(i.name)}</span><b>×${i.qty}</b></li>`).join('')}</ul><div class="two">${o.status==='cooking'?`<button class="btn" data-st="${o.id}|new">戻す</button>`:'<span></span>'}<button class="btn p" data-st="${o.id}|${o.status==='new'?'cooking':'done'}">${o.status==='new'?'調理を始める':'完成'}</button></div></div>`).join('')||'<p class="empty">いま準備する注文はありません</p>';
+  $('#calls').innerHTML=orders.filter(o=>o.status==='done').map(o=>`<div class="call"><span><b>No.${o.no}</b>　完成しました</span><button class="btn p" data-st="${o.id}|handed">渡した</button></div>`).join('');
+}
+function setView(v){
+  if(!linked())v='reji';view=v;store.set('view',v);
+  $('#vReji').hidden=$('#fReji').hidden=v!=='reji';$('#vPrep').hidden=v!=='prep';
+  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.view===v));
+}
+$('#bLink').onclick=()=>{
+  $('#dSet').close();$('#shop').value=shop;$('#fbcfg').value='';
+  $('#fbcfg').placeholder=fb?'設定済みです。変更するときだけ貼り付けてください':'ここに firebaseConfig を貼り付け';
+  $('#dLink').showModal();
+};
+$('#lSave').onclick=()=>{
+  const raw=$('#fbcfg').value.trim(),c=raw?parseFb(raw):fb,sc=$('#shop').value.trim();
+  if(!c)return toast('Firebase の設定を貼り付けてください');
+  if(sc.length<4||/[\/\s]/.test(sc))return toast('店舗コードは4文字以上で、スペースと / は使えません');
+  store.set('fb',c);store.set('shop',sc);location.reload();
+};
+$('#lOff').onclick=()=>{if(confirm('連携をやめますか？（この端末の売上履歴は残ります）')){localStorage.removeItem('pos.fb');localStorage.removeItem('pos.shop');location.reload()}};
+setInterval(()=>{if(linked())renderCloud()},30000);
+render();setView(view);renderCloud();connect();
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>
 </body>
