@@ -1,4 +1,4 @@
-const C = 'reji-v2';
+const C = 'reji-v3';
 const FILES = ['./', 'index.html', 'manifest.json', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(C).then(c => c.addAll(FILES)));
@@ -14,7 +14,7 @@ self.addEventListener('fetch', e => {
   const u = new URL(e.request.url);
   if (u.origin !== location.origin && u.hostname !== 'www.gstatic.com') return;
   e.respondWith(
-    fetch(e.request).then(r => {
+    fetch(e.request,{cache:'no-cache'}).then(r => {
       if (r.ok) { const copy = r.clone(); caches.open(C).then(c => c.put(e.request, copy)); }
       return r;
     }).catch(() => caches.match(e.request).then(r => r || caches.match('index.html')))
