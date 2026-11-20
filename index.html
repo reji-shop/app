@@ -155,7 +155,7 @@ textarea.in{height:130px;padding:10px 14px;font-size:13px;resize:vertical}
       <button class="btn p" id="bLink">複数台で連携する（クラウド）</button>
       <button class="btn" id="bCsv">売上をCSVで保存</button>
       <button class="btn d" id="bWipe">売上履歴をすべて削除</button>
-      <p class="empty" style="padding:0">データはこの端末の中にだけ保存されます。<br>アプリのバージョン：v3</p>
+      <p class="empty" style="padding:0">データはこの端末の中にだけ保存されます。<br>アプリのバージョン：v4</p>
     </div>
   </div>
 </dialog>
@@ -269,7 +269,7 @@ $('#bSet').onclick=()=>{renderSet();$('#dSet').showModal()};
 $('#bCsv').onclick=csv;
 $('#bWipe').onclick=()=>{if(sales.length&&confirm('売上履歴をすべて削除します。元に戻せません。よろしいですか？')){sales=[];store.set('sales',sales);toast('削除しました')}};
 // ===== クラウド連携（Firebase Firestore）=====
-let fb=store.get('fb',null),shop=store.get('shop',''),view=store.get('view','reji'),cloud=null,orders=[],online=false,first=true,cerr='';
+let fb=store.get('fb',null),shop=store.get('shop',''),view=store.get('view','reji'),cloud=null,orders=[],online=false,first=true,cerr='',dbid=store.get('dbid','(default)');
 const linked=()=>!!(fb&&shop);
 const ST={new:'受付',cooking:'調理中'};
 const dayKey=()=>new Date().toLocaleDateString('sv-SE');
@@ -303,7 +303,7 @@ async function connect(){
     const v='10.12.2',base='https://www.gstatic.com/firebasejs/'+v+'/';
     const[A,F]=await Promise.all([import(base+'firebase-app.js'),import(base+'firebase-firestore.js')]);
     const app=A.initializeApp(fb);let db;
-    try{db=F.initializeFirestore(app,{localCache:F.persistentLocalCache(),experimentalAutoDetectLongPolling:true})}catch{db=F.getFirestore(app)}
+    try{db=F.initializeFirestore(app,{localCache:F.persistentLocalCache(),experimentalAutoDetectLongPolling:true},dbid)}catch{db=F.getFirestore(app,dbid)}
     cloud={F,db};
     F.onSnapshot(F.query(F.collection(db,'shops',shop,'orders'),F.where('status','in',['new','cooking','done'])),{includeMetadataChanges:true},snap=>{
       orders=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.ts-b.ts);
@@ -342,26 +342,35 @@ $('#lSave').onclick=()=>{
   const raw=$('#fbcfg').value.trim(),c=raw?parseFb(raw):fb,sc=$('#shop').value.trim();
   if(!c)return toast('Firebase の設定を貼り付けてください');
   if(sc.length<4||/[\/\s]/.test(sc))return toast('店舗コードは4文字以上で、スペースと / は使えません');
-  store.set('fb',c);store.set('shop',sc);location.reload();
+  store.set('fb',c);store.set('shop',sc);if(raw)store.set('dbid','(default)');location.reload();
 };
-$('#lOff').onclick=()=>{if(confirm('連携をやめますか？（この端末の売上履歴は残ります）')){localStorage.removeItem('pos.fb');localStorage.removeItem('pos.shop');location.reload()}};
+$('#lOff').onclick=()=>{if(confirm('連携をやめますか？（この端末の売上履歴は残ります）')){localStorage.removeItem('pos.fb');localStorage.removeItem('pos.shop');localStorage.removeItem('pos.dbid');location.reload()}};
+async function probe(c,sc,id){
+  const url='https://firestore.googleapis.com/v1/projects/'+encodeURIComponent(c.projectId)+'/databases/'+encodeURIComponent(id)+'/documents/shops/'+encodeURIComponent(sc)+'/orders?pageSize=1&key='+encodeURIComponent(c.apiKey);
+  const r=await fetch(url);let j={};try{j=await r.json()}catch{}
+  const er=j.error||{};return{s:r.status,ok:r.ok,st:er.status||'',msg:er.message||''};
+}
+function judge(p){
+  if(p.ok)return'OK：Firestore に接続でき、ルールも通っています。';
+  if(p.s===403&&/disabled|not been used/i.test(p.msg))return'Cloud Firestore API がまだ有効になっていません。Firestore Database の作成を完了してください。';
+  if(p.s===403||p.st==='PERMISSION_DENIED')return'アクセスが拒否されました。Firestore の「セキュリティ」タブに案内したルールを貼り付けて、「公開」まで押したか確認してください。';
+  if(p.s===404||p.st==='NOT_FOUND')return'データベースが見つかりません。下の「プロジェクトID」が、Firebase コンソールで開いているプロジェクトと同じか確認してください。';
+  if(p.s===400)return'設定の値が正しくありません。apiKey と projectId を貼り付け直してください。';
+  return'想定外の応答です。';
+}
 async function diagnose(){
   const out=$('#diag');out.hidden=false;
   const raw=$('#fbcfg').value.trim(),c=raw?parseFb(raw):fb,sc=$('#shop').value.trim()||shop;
   if(!c){out.textContent='Firebase の設定が見つかりません。firebaseConfig を貼り付けてください。';return}
   if(!sc){out.textContent='店舗コードを入力してください。';return}
   out.textContent='確認中…';
-  const url='https://firestore.googleapis.com/v1/projects/'+encodeURIComponent(c.projectId)+'/databases/(default)/documents/shops/'+encodeURIComponent(sc)+'/orders?pageSize=1&key='+encodeURIComponent(c.apiKey);
   try{
-    const r=await fetch(url);let j={};try{j=await r.json()}catch{}
-    const e=j.error||{},msg=e.message||'',st=e.status||'';let t;
-    if(r.ok)t='OK：Firestore に接続でき、ルールも通っています。';
-    else if(r.status===404||st==='NOT_FOUND')t='データベースが見つかりません。Firebase コンソールの Firestore Database で「データベースを作成」を最後まで完了してください。';
-    else if(r.status===403&&/disabled|not been used/i.test(msg))t='Cloud Firestore API がまだ有効になっていません。Firestore Database の作成を完了してください。';
-    else if(r.status===403||st==='PERMISSION_DENIED')t='アクセスが拒否されました。Firestore の「ルール」に案内した内容を貼り付けて、「公開」まで押したか確認してください。';
-    else if(r.status===400)t='設定の値が正しくありません。apiKey と projectId を貼り付け直してください。';
-    else t='想定外の応答です。';
-    out.textContent=t+'\n（応答 '+r.status+(st?' '+st:'')+'）';
+    let id=raw?'(default)':dbid,p=await probe(c,sc,id),note='';
+    if(p.s===404&&id==='(default)'){
+      const q=await probe(c,sc,'default');
+      if(q.s!==404){id='default';p=q;store.set('dbid','default');note='\n\nデータベースIDが「default」（かっこなし）で作られていました。このアプリが「default」を使うように切り替えたので、「保存して連携」を押してください。'}
+    }
+    out.textContent=judge(p)+'\n（プロジェクトID：'+c.projectId+'／データベース：'+id+'／応答 '+p.s+(p.st?' '+p.st:'')+'）'+note;
   }catch{out.textContent='通信できませんでした。ネット接続、または広告ブロックやセキュリティソフトが firestore.googleapis.com をふさいでいないか確認してください。'}
 }
 $('#lDiag').onclick=diagnose;
