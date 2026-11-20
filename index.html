@@ -155,7 +155,7 @@ textarea.in{height:130px;padding:10px 14px;font-size:13px;resize:vertical}
       <button class="btn p" id="bLink">複数台で連携する（クラウド）</button>
       <button class="btn" id="bCsv">売上をCSVで保存</button>
       <button class="btn d" id="bWipe">売上履歴をすべて削除</button>
-      <p class="empty" style="padding:0">データはこの端末の中にだけ保存されます。<br>アプリのバージョン：v8</p>
+      <p class="empty" style="padding:0">データはこの端末の中にだけ保存されます。<br>アプリのバージョン：v9</p>
     </div>
   </div>
 </dialog>
@@ -344,11 +344,18 @@ $('#bLink').onclick=()=>{
   $('#fbcfg').placeholder=fb?'設定済みです。変更するときだけ貼り付けてください':'ここに firebaseConfig を貼り付け';
   $('#dLink').showModal();
 };
-$('#lSave').onclick=()=>{
+$('#lSave').onclick=async()=>{
   const raw=$('#fbcfg').value.trim(),c=raw?parseFb(raw):fb,sc=$('#shop').value.trim();
   if(!c)return toast('Firebase の設定を貼り付けてください');
   if(sc.length<4||/[\/\s]/.test(sc))return toast('店舗コードは4文字以上で、スペースと / は使えません');
-  store.set('fb',c);store.set('shop',sc);if(raw)store.set('dbid','(default)');location.reload();
+  $('#lSave').disabled=true;toast('確認しています…');
+  // データベース名（(default) か default）を自動で見分ける
+  let id=(fb&&fb.projectId===c.projectId)?dbid:'(default)';
+  try{
+    const p=await probe(c,sc,id);
+    if(p.s===404){const alt=id==='(default)'?'default':'(default)',q=await probe(c,sc,alt);if(q.s!==404)id=alt}
+  }catch{}
+  store.set('fb',c);store.set('shop',sc);store.set('dbid',id);location.reload();
 };
 $('#lOff').onclick=()=>{if(confirm('連携をやめますか？（この端末の売上履歴は残ります）')){localStorage.removeItem('pos.fb');localStorage.removeItem('pos.shop');localStorage.removeItem('pos.dbid');location.reload()}};
 async function probe(c,sc,id){
