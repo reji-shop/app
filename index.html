@@ -155,7 +155,7 @@ textarea.in{height:130px;padding:10px 14px;font-size:13px;resize:vertical}
       <button class="btn p" id="bLink">複数台で連携する（クラウド）</button>
       <button class="btn" id="bCsv">売上をCSVで保存</button>
       <button class="btn d" id="bWipe">売上履歴をすべて削除</button>
-      <p class="empty" style="padding:0">データはこの端末の中にだけ保存されます。<br>アプリのバージョン：v4</p>
+      <p class="empty" style="padding:0">データはこの端末の中にだけ保存されます。<br>アプリのバージョン：v5</p>
     </div>
   </div>
 </dialog>
@@ -370,7 +370,7 @@ async function diagnose(){
       const q=await probe(c,sc,'default');
       if(q.s!==404){id='default';p=q;store.set('dbid','default');note='\n\nデータベースIDが「default」（かっこなし）で作られていました。このアプリが「default」を使うように切り替えたので、「保存して連携」を押してください。'}
     }
-    out.textContent=judge(p)+'\n（プロジェクトID：'+c.projectId+'／データベース：'+id+'／応答 '+p.s+(p.st?' '+p.st:'')+'）'+note;
+    out.textContent=judge(p)+'\n（プロジェクトID：'+c.projectId+'／データベース：'+id+'／応答 '+p.s+(p.st?' '+p.st:'')+'）'+(p.msg&&!p.ok?'\n詳細：'+p.msg.slice(0,200):'')+note;
   }catch{out.textContent='通信できませんでした。ネット接続、または広告ブロックやセキュリティソフトが firestore.googleapis.com をふさいでいないか確認してください。'}
 }
 $('#lDiag').onclick=diagnose;
