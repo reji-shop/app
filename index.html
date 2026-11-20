@@ -155,7 +155,7 @@ textarea.in{height:130px;padding:10px 14px;font-size:13px;resize:vertical}
       <button class="btn p" id="bLink">複数台で連携する（クラウド）</button>
       <button class="btn" id="bCsv">売上をCSVで保存</button>
       <button class="btn d" id="bWipe">売上履歴をすべて削除</button>
-      <p class="empty" style="padding:0">データはこの端末の中にだけ保存されます。<br>アプリのバージョン：v9</p>
+      <p class="empty" style="padding:0">データはこの端末の中にだけ保存されます。<br>アプリのバージョン：v10</p>
     </div>
   </div>
 </dialog>
@@ -168,6 +168,7 @@ textarea.in{height:130px;padding:10px 14px;font-size:13px;resize:vertical}
     <label for="fbcfg">Firebase の設定</label>
     <textarea class="in" id="fbcfg" autocomplete="off" autocapitalize="off" spellcheck="false" style="margin-bottom:6px"></textarea>
     <p class="hint">Firebase コンソールの「プロジェクトの設定」→「マイアプリ」にある firebaseConfig を、そのまま貼り付けます。</p>
+    <label style="display:flex;gap:10px;align-items:center;font-weight:400;margin:0 0 14px"><input type="checkbox" id="lp" style="width:22px;height:22px;flex:none"><span>安定モード（スマホで通知が遅れるとき向け）</span></label>
     <button class="btn" id="lDiag" style="width:100%;margin-bottom:10px">接続を診断する</button>
     <pre class="hint" id="diag" hidden style="white-space:pre-wrap;font:inherit;background:#f2f6fd;border-radius:10px;padding:10px"></pre>
     <div class="two"><button class="btn d" id="lOff">連携をやめる</button><button class="btn p" id="lSave">保存して連携</button></div>
@@ -308,7 +309,7 @@ async function connect(){
     const v='10.12.2',base='https://www.gstatic.com/firebasejs/'+v+'/';
     const[A,F]=await Promise.all([import(base+'firebase-app.js'),import(base+'firebase-firestore.js')]);
     const app=A.initializeApp(fb);let db;
-    try{db=F.initializeFirestore(app,{localCache:F.persistentLocalCache(),experimentalAutoDetectLongPolling:true},dbid)}catch{db=F.getFirestore(app,dbid)}
+    try{db=F.initializeFirestore(app,{localCache:F.persistentLocalCache(),...(store.get('lp',true)?{experimentalForceLongPolling:true}:{experimentalAutoDetectLongPolling:true})},dbid)}catch{db=F.getFirestore(app,dbid)}
     cloud={F,db};
     F.onSnapshot(ref('meta','tick'),s=>{tickSeen=s.exists()?s.data().t:0},()=>{});
     F.onSnapshot(F.query(F.collection(db,'shops',shop,'orders'),F.where('status','in',['new','cooking','done'])),{includeMetadataChanges:true},snap=>{
@@ -340,7 +341,7 @@ function setView(v){
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.view===v));
 }
 $('#bLink').onclick=()=>{
-  $('#dSet').close();$('#diag').hidden=true;$('#shop').value=shop;$('#fbcfg').value='';
+  $('#dSet').close();$('#diag').hidden=true;$('#shop').value=shop;$('#fbcfg').value='';$('#lp').checked=store.get('lp',true);
   $('#fbcfg').placeholder=fb?'設定済みです。変更するときだけ貼り付けてください':'ここに firebaseConfig を貼り付け';
   $('#dLink').showModal();
 };
@@ -355,7 +356,7 @@ $('#lSave').onclick=async()=>{
     const p=await probe(c,sc,id);
     if(p.s===404){const alt=id==='(default)'?'default':'(default)',q=await probe(c,sc,alt);if(q.s!==404)id=alt}
   }catch{}
-  store.set('fb',c);store.set('shop',sc);store.set('dbid',id);location.reload();
+  store.set('fb',c);store.set('shop',sc);store.set('dbid',id);store.set('lp',$('#lp').checked);location.reload();
 };
 $('#lOff').onclick=()=>{if(confirm('連携をやめますか？（この端末の売上履歴は残ります）')){localStorage.removeItem('pos.fb');localStorage.removeItem('pos.shop');localStorage.removeItem('pos.dbid');location.reload()}};
 async function probe(c,sc,id){
@@ -419,11 +420,11 @@ async function poll(){
     const t=await cloud.F.getDocFromServer(ref('meta','tick'));
     const v=t.exists()?t.data().t:0;
     online=true;cerr='';lastSync=Date.now();
-    if(tickSeen!==null&&v!==tickSeen){if(++stale>=2){stale=0;await resume()}}else stale=0;
+    if(tickSeen!==null&&v!==tickSeen){await new Promise(r=>setTimeout(r,1000));if(tickSeen!==v)await resume()}
   }catch{online=false}
   renderCloud();polling=false;
 }
-setInterval(poll,5000);
+setInterval(poll,4000);
 setInterval(()=>{if(linked())renderCloud()},30000);
 const HINT='まだ接続できていません。Firestore Database の作成、ルールの公開、設定と店舗コードの貼り付けを確認してください';
 $('#conn').onclick=()=>toast(online?'接続中です':cerr?'エラー：'+cerr:HINT,5000);
