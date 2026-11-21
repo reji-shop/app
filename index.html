@@ -69,6 +69,7 @@ label{display:block;font-weight:700;margin:0 0 6px}
 #gate{position:fixed;inset:0;z-index:50;background:var(--bg);display:flex;padding:calc(20px + env(safe-area-inset-top)) 20px 20px;overflow:auto}
 .gbox{width:min(100%,420px);margin:auto}
 #toast{z-index:100}
+.li>div:first-child{flex:1;min-width:0}
 .acct{background:#f2f6fd;border-radius:12px;padding:8px 12px}
 .arow{display:flex;align-items:center;gap:8px;padding:6px 0}
 .al{flex:none;width:76px;font-size:13px;color:var(--sub)}
@@ -170,8 +171,8 @@ textarea.in{height:130px;padding:10px 14px;font-size:13px;resize:vertical}
       <button class="btn d" id="aEnd" hidden>営業を終了（IDとクラウドのデータを削除）</button>
       <p class="empty" id="noCfg" hidden style="padding:0">クラウド連携を使うには config.js の設定が必要です。</p>
       <button class="btn" id="bCsv">売上をCSVで保存</button>
-      <button class="btn d" id="bWipe">売上履歴をすべて削除</button>
-      <p class="empty" style="padding:0">売上履歴は、この端末の中にだけ保存されます。<br>アプリのバージョン：v16</p>
+      <button class="btn d" id="bWipe">この端末の売上履歴を削除</button>
+      <p class="empty" style="padding:0">売上履歴は、この端末の中にだけ保存されます。<br>アプリのバージョン：v18</p>
     </div>
   </div>
 </dialog>
@@ -273,19 +274,48 @@ async function confirmPay(){
   sales.push(s);store.set('sales',sales);sendOrder(s);
   const ch=paid-t;cart={};paid=0;$('#dPay').close();render();toast(`会計完了　おつり ${yen(ch)}`);
 }
-function renderHist(){
-  const td=sales.filter(s=>isToday(s.ts));
-  $('#hsum').innerHTML=`本日の売上 <b>${yen(td.reduce((a,s)=>a+s.total,0))}</b>（${td.length}件）`;
-  $('#hlist').innerHTML=td.slice().reverse().map(s=>`<div class="li"><div><b>No.${s.no}</b>　${new Date(s.ts).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})}<small>${esc(s.items.map(i=>i.name+'×'+i.qty).join('、'))}</small></div><b>${yen(s.total)}</b></div>`).join('')||'<p class="empty">本日の会計はまだありません</p>';
+let histList=[],histLabel='',histNote='';
+function drawHist(td,label,note){
+  histList=td;histLabel=label;histNote=note||'';
+  $('#hsum').innerHTML=label+'の売上 <b>'+yen(td.reduce((a,s)=>a+s.total,0))+'</b>（'+td.length+'件）'+(note?'<small style="display:block;color:var(--sub);font-size:13px;margin-top:2px">'+note+'</small>':'');
+  $('#hlist').innerHTML=td.slice().reverse().map(s=>`<div class="li"><div><b>No.${s.no}</b>　${new Date(s.ts).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})}<small>${esc(s.items.map(i=>i.name+'×'+i.qty).join('、'))}</small></div><b>${yen(s.total)}</b><button class="btn d" data-delsale="${s.id}">削除</button></div>`).join('')||'<p class="empty">本日の会計はまだありません</p>';
+}
+function delSale(id){
+  const s=histList.find(x=>x.id===id);if(!s)return;
+  const when=new Date(s.ts).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});
+  const shared=linked()&&cloud;
+  if(!confirm('No.'+s.no+'（'+when+'・'+yen(s.total)+'）を削除しますか？\n'+(shared?'全端末の売上から外れて、元に戻せません。':'売上から外れて、元に戻せません。')))return;
+  sales=sales.filter(x=>x.id!==id);store.set('sales',sales);
+  if(shared)commit(b=>b.delete(ref('orders',id)),'クラウドから削除できませんでした');
+  drawHist(histList.filter(x=>x.id!==id),histLabel,histNote);
+  toast('削除しました');
+}
+async function renderHist(){
+  const local=sales.filter(s=>isToday(s.ts));
+  if(!linked()||!cloud){drawHist(local,'本日（この端末）');return}
+  drawHist(local,'本日（この端末）','全端末の分を読み込んでいます…');
+  try{
+    const F=cloud.F,st=new Date();st.setHours(0,0,0,0);
+    const snap=await F.getDocsFromServer(F.query(F.collection(cloud.db,'shops',shop,'orders'),F.where('ts','>=',st.getTime())));
+    drawHist(snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.ts-b.ts),'本日（全端末）');
+  }catch{drawHist(local,'本日（この端末）','通信できなかったため、この端末の分だけを表示しています')}
 }
 function renderSet(){
   acctUI();
   $('#slist').innerHTML=products.map(p=>`<div class="li"><div>${esc(p.name)}<small>${yen(p.price)}</small></div><div><button class="btn" data-edit="${p.id}">編集</button> <button class="btn d" data-rm="${p.id}">削除</button></div></div>`).join('')||'<p class="empty">商品がまだありません</p>';
 }
-function csv(){
-  if(!sales.length)return toast('保存する売上がありません');
+async function csv(){
+  let list=sales;
+  if(linked()&&cloud){
+    try{
+      toast('全端末の売上を読み込んでいます…');
+      const F=cloud.F,snap=await F.getDocsFromServer(F.collection(cloud.db,'shops',shop,'orders'));
+      list=snap.docs.map(d=>d.data()).sort((a,b)=>a.ts-b.ts);
+    }catch{toast('通信できなかったため、この端末の分だけ保存します')}
+  }
+  if(!list.length)return toast('保存する売上がありません');
   const r=[['日時','注文No','商品名','単価','数量','小計']];
-  sales.forEach(s=>s.items.forEach(i=>r.push([new Date(s.ts).toLocaleString('ja-JP'),s.no,i.name,i.price,i.qty,i.price*i.qty])));
+  list.forEach(s=>s.items.forEach(i=>r.push([new Date(s.ts).toLocaleString('ja-JP'),s.no,i.name,i.price,i.qty,i.price*i.qty])));
   const t='\ufeff'+r.map(a=>a.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\r\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:'text/csv'}));
   a.download='sales-'+new Date().toISOString().slice(0,10)+'.csv';a.click();
@@ -301,6 +331,7 @@ document.addEventListener('click',e=>{
   else if('close' in d)b.closest('dialog').close();
   else if(d.edit)openProd(d.edit);
   else if(d.rm){const p=find(d.rm);if(p&&confirm(`「${p.name}」を削除しますか？`)){products=products.filter(x=>x.id!==p.id);delete cart[p.id];store.set('products',products);render();renderSet()}}
+  else if(d.delsale)delSale(d.delsale);
   else if(d.view)setView(d.view);
   else if(d.st){const[id,s]=d.st.split('|');setStatus(id,s)}
   else if(d.amt){if(d.amt==='exact')paid=total();else if(d.amt==='clr')paid=0;else paid+=Number(d.amt);updPay()}
@@ -314,7 +345,7 @@ $('#clr').onclick=()=>{if(Object.keys(cart).length&&confirm('注文をすべて�
 $('#bHist').onclick=()=>{renderHist();$('#dHist').showModal()};
 $('#bSet').onclick=()=>{renderSet();$('#dSet').showModal()};
 $('#bCsv').onclick=csv;
-$('#bWipe').onclick=()=>{if(sales.length&&confirm('売上履歴をすべて削除します。元に戻せません。よろしいですか？')){sales=[];store.set('sales',sales);toast('削除しました')}};
+$('#bWipe').onclick=()=>{if(sales.length&&confirm('この端末の売上履歴をすべて削除します（クラウドに保存された売上は消えません）。元に戻せません。よろしいですか？')){sales=[];store.set('sales',sales);toast('削除しました')}};
 // ===== クラウド連携（Firebase Firestore）=====
 const sess={get(k,d){try{return JSON.parse(sessionStorage.getItem('pos.'+k))??d}catch{return d}},set(k,v){try{sessionStorage.setItem('pos.'+k,JSON.stringify(v))}catch{}}};
 let fb=store.get('fb',null),shop=store.get('shop','')||sess.get('shop',''),view=store.get('view','reji'),cloud=null,orders=[],online=false,first=true,cerr='',dbid=store.get('dbid','(default)'),lastSync=0,pending=0,tickSeen=null,stale=0,polling=false;
@@ -504,7 +535,7 @@ async function newShop(){
 }
 async function endShop(){
   if(!cloud||!authMod||!authObj||!authObj.currentUser)return toast('先にログインしてください');
-  if(!confirm('営業を終了します。\nこの店舗IDと、クラウド上の注文データをすべて削除します。他の端末もつながらなくなります。\n（この端末の売上履歴は残ります）'))return;
+  if(!confirm('営業を終了します。\nこの店舗IDと、クラウド上の注文データをすべて削除します。他の端末もつながらなくなります。\n（この端末の売上履歴は残ります）\n売上を残したい場合は、先にCSVで保存してください。'))return;
   const pw=prompt('パスワードを入力してください');if(!pw)return;
   $('#aEnd').disabled=true;toast('削除しています…',8000);
   try{
