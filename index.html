@@ -171,7 +171,7 @@ textarea.in{height:130px;padding:10px 14px;font-size:13px;resize:vertical}
       <p class="empty" id="noCfg" hidden style="padding:0">クラウド連携を使うには config.js の設定が必要です。</p>
       <button class="btn" id="bCsv">売上をCSVで保存</button>
       <button class="btn d" id="bWipe">売上履歴をすべて削除</button>
-      <p class="empty" style="padding:0">売上履歴は、この端末の中にだけ保存されます。<br>アプリのバージョン：v14</p>
+      <p class="empty" style="padding:0">売上履歴は、この端末の中にだけ保存されます。<br>アプリのバージョン：v15</p>
     </div>
   </div>
 </dialog>
@@ -202,19 +202,13 @@ textarea.in{height:130px;padding:10px 14px;font-size:13px;resize:vertical}
       <p class="hint">英小文字・数字・- _ が使えます（3〜30文字）。全端末で同じIDにします。</p>
       <label for="apw">パスワード</label>
       <input class="in" id="apw" type="password" autocomplete="off" placeholder="6文字以上" style="margin-bottom:6px">
-      <p class="hint">2台目以降は、1台目で決まったIDとパスワードで「ログイン」します。</p>
+      <p class="hint">2台目以降は、1台目のIDとパスワードで「ログイン」します（設定で確認できます）。</p>
       <label style="display:flex;gap:10px;align-items:center;font-weight:400;margin:0 0 12px"><input type="checkbox" id="rem" style="width:22px;height:22px;flex:none"><span>この端末にログインを記憶する（オフなら、アプリを閉じるたびに入力が必要です）</span></label>
       <div class="stack" style="margin:0 0 14px">
         <button class="btn p" id="aIn">ログイン</button>
         <button class="btn" id="aNew">新しい店舗を作る（IDとパスワードを自動で決める）</button>
         <button class="lnk" id="aSolo" style="padding:12px;text-align:center">ログインせず、この端末だけで使う</button>
       </div>
-    </div>
-    <div id="newInfo" hidden>
-      <p style="margin:0 0 10px;font-weight:700">店舗IDとパスワードができました</p>
-      <div style="background:#f2f6fd;border-radius:12px;padding:12px;margin-bottom:10px;font-size:20px;line-height:1.9;overflow-wrap:anywhere">ID：<b id="niId"></b><br>パスワード：<b id="niPw"></b></div>
-      <p class="hint">他の端末では、これを入力して「ログイン」します。<b>この画面を閉じるとパスワードは二度と表示されません。</b>必ずメモしてください。</p>
-      <button class="btn p" id="niOk" style="width:100%">メモしました。始める</button>
     </div>
   </div>
 </div>
@@ -403,7 +397,7 @@ function setView(v){
 }
 function openGate(){
   $('#dSet').close();
-  $('#authBox').hidden=false;$('#newInfo').hidden=true;busy(false);
+  $('#authBox').hidden=false;busy(false);
   $('#aid').value=shop;$('#apw').value='';$('#rem').checked=store.get('rem',false);
   $('#gate').hidden=false;
 }
@@ -497,9 +491,7 @@ async function newShop(){
       try{await AU.createUserWithEmailAndPassword(auth,id+EMAIL,pw);break}
       catch(e){if(e.code!=='auth/email-already-in-use'||i===5)throw e}
     }
-    saveShop(id,rem,pw);
-    $('#niId').textContent=id;$('#niPw').textContent=pw;
-    $('#authBox').hidden=true;$('#newInfo').hidden=false;
+    saveShop(id,rem,pw);location.reload();
   }catch(e){toast(AUERR[e.code]||'作成できませんでした（'+(e.code||'エラー')+'）',5000);busy(false)}
 }
 async function endShop(){
@@ -519,8 +511,7 @@ async function endShop(){
     location.reload();
   }catch(e){$('#aEnd').disabled=false;toast((e.code==='auth/wrong-password'||e.code==='auth/invalid-credential')?'パスワードが違います':'削除できませんでした（'+(e.code||'エラー')+'）',5000)}
 }
-$('#aIn').onclick=doLogin;$('#aNew').onclick=newShop;$('#aEnd').onclick=endShop;$('#niOk').onclick=()=>location.reload();
-$('#aSolo').onclick=()=>{sess.set('solo',1);$('#gate').hidden=true};
+$('#aIn').onclick=doLogin;$('#aNew').onclick=newShop;$('#aEnd').onclick=endShop;$('#aSolo').onclick=()=>{sess.set('solo',1);$('#gate').hidden=true};
 $('#lp').onchange=()=>{store.set('lp',$('#lp').checked);if(BUILT)location.reload();else toast('「保存して連携」を押すと反映されます')};
 const logout=async()=>{
   if(!confirm(BUILT?'ログアウトしますか？（この端末の売上履歴は残ります）':'連携をやめますか？（この端末の売上履歴は残ります）'))return;
