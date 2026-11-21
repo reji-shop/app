@@ -70,6 +70,9 @@ label{display:block;font-weight:700;margin:0 0 6px}
 .gbox{width:min(100%,420px);margin:auto}
 #toast{z-index:100}
 .li>div:first-child{flex:1;min-width:0}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:#e3ebfa;border-radius:12px;padding:4px;margin-bottom:12px}
+.seg button{height:40px;border:0;border-radius:9px;background:none;font-weight:700;color:var(--sub)}
+.seg .on{background:#fff;color:var(--blue);box-shadow:0 1px 3px rgba(0,0,0,.15)}
 .acct{background:#f2f6fd;border-radius:12px;padding:8px 12px}
 .arow{display:flex;align-items:center;gap:8px;padding:6px 0}
 .al{flex:none;width:76px;font-size:13px;color:var(--sub)}
@@ -152,7 +155,7 @@ textarea.in{height:130px;padding:10px 14px;font-size:13px;resize:vertical}
 
 <dialog id="dHist">
   <div class="dh"><span>売上履歴</span><button class="x" data-close aria-label="閉じる">✕</button></div>
-  <div class="db"><p id="hsum" style="margin:0 0 6px;font-size:17px"></p><div id="hlist"></div></div>
+  <div class="db"><div class="seg" id="hTabs" hidden><button data-hm="local">この端末</button><button data-hm="all">全体</button></div><p id="hsum" style="margin:0 0 6px;font-size:17px"></p><div id="hlist"></div></div>
 </dialog>
 
 <dialog id="dSet">
@@ -172,7 +175,7 @@ textarea.in{height:130px;padding:10px 14px;font-size:13px;resize:vertical}
       <p class="empty" id="noCfg" hidden style="padding:0">クラウド連携を使うには config.js の設定が必要です。</p>
       <button class="btn" id="bCsv">売上をCSVで保存</button>
       <button class="btn d" id="bWipe">この端末の売上履歴を削除</button>
-      <p class="empty" style="padding:0">売上履歴は、この端末の中にだけ保存されます。<br>アプリのバージョン：v18</p>
+      <p class="empty" style="padding:0">売上履歴は、この端末の中にだけ保存されます。<br>アプリのバージョン：v19</p>
     </div>
   </div>
 </dialog>
@@ -290,15 +293,23 @@ function delSale(id){
   drawHist(histList.filter(x=>x.id!==id),histLabel,histNote);
   toast('削除しました');
 }
+let histMode=null;
 async function renderHist(){
-  const local=sales.filter(s=>isToday(s.ts));
-  if(!linked()||!cloud){drawHist(local,'本日（この端末）');return}
-  drawHist(local,'本日（この端末）','全端末の分を読み込んでいます…');
+  const L=!!(linked()&&cloud);
+  $('#hTabs').hidden=!L;
+  if(!L)histMode='local';else if(!histMode)histMode='all';
+  document.querySelectorAll('#hTabs button').forEach(b=>b.classList.toggle('on',b.dataset.hm===histMode));
+  if(histMode==='local'){drawHist(sales.filter(s=>isToday(s.ts)),'本日（この端末）');return}
+  $('#hsum').textContent='全体の売上を読み込んでいます…';$('#hlist').innerHTML='';
   try{
     const F=cloud.F,st=new Date();st.setHours(0,0,0,0);
     const snap=await F.getDocsFromServer(F.query(F.collection(cloud.db,'shops',shop,'orders'),F.where('ts','>=',st.getTime())));
-    drawHist(snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.ts-b.ts),'本日（全端末）');
-  }catch{drawHist(local,'本日（この端末）','通信できなかったため、この端末の分だけを表示しています')}
+    if(histMode!=='all')return;
+    drawHist(snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.ts-b.ts),'本日（全体）');
+  }catch{
+    if(histMode!=='all')return;
+    histList=[];$('#hsum').textContent='全体の売上を読み込めませんでした。通信を確認して、開き直してください。';$('#hlist').innerHTML='';
+  }
 }
 function renderSet(){
   acctUI();
@@ -332,6 +343,7 @@ document.addEventListener('click',e=>{
   else if(d.edit)openProd(d.edit);
   else if(d.rm){const p=find(d.rm);if(p&&confirm(`「${p.name}」を削除しますか？`)){products=products.filter(x=>x.id!==p.id);delete cart[p.id];store.set('products',products);render();renderSet()}}
   else if(d.delsale)delSale(d.delsale);
+  else if(d.hm){histMode=d.hm;renderHist()}
   else if(d.view)setView(d.view);
   else if(d.st){const[id,s]=d.st.split('|');setStatus(id,s)}
   else if(d.amt){if(d.amt==='exact')paid=total();else if(d.amt==='clr')paid=0;else paid+=Number(d.amt);updPay()}
@@ -345,7 +357,15 @@ $('#clr').onclick=()=>{if(Object.keys(cart).length&&confirm('注文をすべて�
 $('#bHist').onclick=()=>{renderHist();$('#dHist').showModal()};
 $('#bSet').onclick=()=>{renderSet();$('#dSet').showModal()};
 $('#bCsv').onclick=csv;
-$('#bWipe').onclick=()=>{if(sales.length&&confirm('この端末の売上履歴をすべて削除します（クラウドに保存された売上は消えません）。元に戻せません。よろしいですか？')){sales=[];store.set('sales',sales);toast('削除しました')}};
+$('#bWipe').onclick=()=>{
+  if(!sales.length)return toast('削除する履歴がありません');
+  const shared=!!(linked()&&cloud);
+  if(!confirm(shared?'この端末で会計した売上をすべて削除します。全体の履歴からも消えます。元に戻せません。よろしいですか？':'この端末の売上履歴をすべて削除します。元に戻せません。よろしいですか？'))return;
+  const ids=sales.map(s=>s.id);
+  sales=[];store.set('sales',sales);
+  if(shared)for(let i=0;i<ids.length;i+=400)commit(b=>ids.slice(i,i+400).forEach(id=>b.delete(ref('orders',id))),'クラウドから削除できませんでした');
+  toast('削除しました');
+};
 // ===== クラウド連携（Firebase Firestore）=====
 const sess={get(k,d){try{return JSON.parse(sessionStorage.getItem('pos.'+k))??d}catch{return d}},set(k,v){try{sessionStorage.setItem('pos.'+k,JSON.stringify(v))}catch{}}};
 let fb=store.get('fb',null),shop=store.get('shop','')||sess.get('shop',''),view=store.get('view','reji'),cloud=null,orders=[],online=false,first=true,cerr='',dbid=store.get('dbid','(default)'),lastSync=0,pending=0,tickSeen=null,stale=0,polling=false;
@@ -444,6 +464,7 @@ function acctUI(){
   $('#bLink').hidden=L||!BUILT;$('#bOut').hidden=!L;
   $('#aEnd').hidden=!(L&&authObj&&authObj.currentUser);
   $('#noCfg').hidden=!!BUILT;
+  $('#bWipe').textContent=L?'この端末で会計した売上を削除（全体からも消えます）':'この端末の売上履歴を削除';
 }
 $('#bLink').onclick=openGate;
 function wipeLogin(){
