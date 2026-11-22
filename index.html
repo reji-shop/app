@@ -171,11 +171,11 @@ textarea.in{height:130px;padding:10px 14px;font-size:13px;resize:vertical}
       </div>
       <button class="btn p" id="bLink">ログイン／新規登録</button>
       <button class="btn" id="bOut" hidden>ログアウト</button>
-      <button class="btn d" id="aEnd" hidden>営業を終了（IDとクラウドのデータを削除）</button>
+      <button class="btn d" id="aEnd" hidden>営業を終了（CSV保存＋データをすべて削除）</button>
       <p class="empty" id="noCfg" hidden style="padding:0">クラウド連携を使うには config.js の設定が必要です。</p>
       <button class="btn" id="bCsv">売上をCSVで保存</button>
       <button class="btn d" id="bWipe">この端末の売上履歴を削除</button>
-      <p class="empty" style="padding:0">売上履歴は、この端末の中にだけ保存されます。<br>アプリのバージョン：v19</p>
+      <p class="empty" style="padding:0">売上履歴は、この端末の中にだけ保存されます。<br>アプリのバージョン：v20</p>
     </div>
   </div>
 </dialog>
@@ -315,21 +315,28 @@ function renderSet(){
   acctUI();
   $('#slist').innerHTML=products.map(p=>`<div class="li"><div>${esc(p.name)}<small>${yen(p.price)}</small></div><div><button class="btn" data-edit="${p.id}">編集</button> <button class="btn d" data-rm="${p.id}">削除</button></div></div>`).join('')||'<p class="empty">商品がまだありません</p>';
 }
+function downloadCsv(list){
+  const r=[['日時','注文No','商品名','単価','数量','小計']];
+  let qty=0,sum=0;
+  list.forEach(s=>s.items.forEach(i=>{qty+=i.qty;sum+=i.price*i.qty;r.push([new Date(s.ts).toLocaleString('ja-JP'),s.no,i.name,i.price,i.qty,i.price*i.qty])}));
+  r.push(['','','【合計】','',qty,sum]);
+  r.push(['','','【注文件数】','',list.length,'']);
+  const t='\ufeff'+r.map(a=>a.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\r\n');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:'text/csv'}));
+  a.download='sales-'+dayKey()+'.csv';a.click();
+}
+async function fetchAllOrders(){
+  const F=cloud.F,snap=await F.getDocsFromServer(F.collection(cloud.db,'shops',shop,'orders'));
+  return snap.docs.map(d=>d.data()).sort((a,b)=>a.ts-b.ts);
+}
 async function csv(){
   let list=sales;
   if(linked()&&cloud){
-    try{
-      toast('全端末の売上を読み込んでいます…');
-      const F=cloud.F,snap=await F.getDocsFromServer(F.collection(cloud.db,'shops',shop,'orders'));
-      list=snap.docs.map(d=>d.data()).sort((a,b)=>a.ts-b.ts);
-    }catch{toast('通信できなかったため、この端末の分だけ保存します')}
+    try{toast('全体の売上を読み込んでいます…');list=await fetchAllOrders()}
+    catch{toast('通信できなかったため、この端末の分だけ保存します')}
   }
   if(!list.length)return toast('保存する売上がありません');
-  const r=[['日時','注文No','商品名','単価','数量','小計']];
-  list.forEach(s=>s.items.forEach(i=>r.push([new Date(s.ts).toLocaleString('ja-JP'),s.no,i.name,i.price,i.qty,i.price*i.qty])));
-  const t='\ufeff'+r.map(a=>a.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\r\n');
-  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:'text/csv'}));
-  a.download='sales-'+new Date().toISOString().slice(0,10)+'.csv';a.click();
+  downloadCsv(list);
 }
 
 document.addEventListener('click',e=>{
@@ -455,7 +462,7 @@ function setView(v){
 function openGate(){
   $('#dSet').close();
   $('#authBox').hidden=false;$('#newInfo').hidden=true;busy(false);
-  $('#aid').value=shop;$('#apw').value='';$('#rem').checked=store.get('rem',false);
+  $('#aid').value=shop;$('#apw').value='';$('#rem').checked=true;
   $('#gate').hidden=false;
 }
 function acctUI(){
@@ -556,17 +563,24 @@ async function newShop(){
 }
 async function endShop(){
   if(!cloud||!authMod||!authObj||!authObj.currentUser)return toast('先にログインしてください');
-  if(!confirm('営業を終了します。\nこの店舗IDと、クラウド上の注文データをすべて削除します。他の端末もつながらなくなります。\n（この端末の売上履歴は残ります）\n売上を残したい場合は、先にCSVで保存してください。'))return;
+  if(!confirm('営業を終了します。\n先に、全体の売上をCSVファイルに保存します。そのあと、この店舗ID・クラウド上の注文データ・この端末の売上履歴をすべて削除します。他の端末もつながらなくなります。'))return;
   const pw=prompt('パスワードを入力してください');if(!pw)return;
-  $('#aEnd').disabled=true;toast('削除しています…',8000);
+  $('#aEnd').disabled=true;toast('売上をCSVにまとめています…',8000);
   try{
     const u=authObj.currentUser,F=cloud.F;
     await authMod.reauthenticateWithCredential(u,authMod.EmailAuthProvider.credential(u.email,pw));
+    const list=await fetchAllOrders();
+    if(list.length){
+      downloadCsv(list);
+      if(!confirm('売上のCSVファイルを保存しました（ダウンロードされたか確認してください）。\n保存できていることを確認してから「OK」を押すと、削除を始めます。\n「キャンセル」を押すと、何も削除せずに戻ります。')){$('#aEnd').disabled=false;return}
+    }
+    toast('削除しています…',8000);
     for(const col of['orders','meta']){
       const s=await F.getDocsFromServer(F.collection(cloud.db,'shops',shop,col));
       for(let i=0;i<s.docs.length;i+=400){const b=F.writeBatch(cloud.db);s.docs.slice(i,i+400).forEach(d=>b.delete(d.ref));await b.commit()}
     }
     await authMod.deleteUser(u);
+    sales=[];store.set('sales',sales);
     wipeLogin();
     location.reload();
   }catch(e){$('#aEnd').disabled=false;toast((e.code==='auth/wrong-password'||e.code==='auth/invalid-credential')?'パスワードが違います':'削除できませんでした（'+(e.code||'エラー')+'）',5000)}
