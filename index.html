@@ -175,7 +175,7 @@ textarea.in{height:130px;padding:10px 14px;font-size:13px;resize:vertical}
       <p class="empty" id="noCfg" hidden style="padding:0">クラウド連携を使うには config.js の設定が必要です。</p>
       <button class="btn" id="bCsv">売上をCSVで保存</button>
       <button class="btn d" id="bWipe">この端末の売上履歴を削除</button>
-      <p class="empty" style="padding:0">売上履歴は、この端末の中にだけ保存されます。<br>アプリのバージョン：v20</p>
+      <p class="empty" style="padding:0">売上履歴は、この端末の中にだけ保存されます。<br>アプリのバージョン：v21</p>
     </div>
   </div>
 </dialog>
@@ -321,6 +321,13 @@ function downloadCsv(list){
   list.forEach(s=>s.items.forEach(i=>{qty+=i.qty;sum+=i.price*i.qty;r.push([new Date(s.ts).toLocaleString('ja-JP'),s.no,i.name,i.price,i.qty,i.price*i.qty])}));
   r.push(['','','【合計】','',qty,sum]);
   r.push(['','','【注文件数】','',list.length,'']);
+  // 商品ごとの集計（売れた数の多い順）
+  const by=new Map();
+  list.forEach(s=>s.items.forEach(i=>{const x=by.get(i.name)||{q:0,a:0};x.q+=i.qty;x.a+=i.price*i.qty;by.set(i.name,x)}));
+  r.push([]);
+  r.push(['【商品別集計】']);
+  r.push(['','','商品名','','数量','金額']);
+  [...by].sort((a,b)=>b[1].q-a[1].q||b[1].a-a[1].a).forEach(([n,x])=>r.push(['','',n,'',x.q,x.a]));
   const t='\ufeff'+r.map(a=>a.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\r\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:'text/csv'}));
   a.download='sales-'+dayKey()+'.csv';a.click();
